@@ -3,7 +3,6 @@ import subprocess
 import threading
 import time
 import tkinter as tk
-import webbrowser
 from tkinter import messagebox
 
 import cv2
@@ -272,8 +271,6 @@ class RecorderApp:
             self.final_file = default_name
             self._log(f"Saved to {self.final_file}")
             messagebox.showinfo("Done", f"Recording saved to {self.final_file}")
-            folder = os.path.dirname(os.path.abspath(self.final_file))
-            webbrowser.open(f"file://{folder}")
 
 
 def main():
