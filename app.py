@@ -276,7 +276,11 @@ class RecorderApp:
             webbrowser.open(f"file://{folder}")
 
 
-if __name__ == "__main__":
+def main():
     root = tk.Tk()
-    app = RecorderApp(root)
+    RecorderApp(root)
     root.mainloop()
+
+
+if __name__ == "__main__":
+    main()

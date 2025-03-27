@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Screen Recorder
+Exec=/home/m0tz/.local/bin/screenrec
+Icon=utilities-terminal
+Terminal=false
+Categories=AudioVideo;
+StartupWMClass=python3
