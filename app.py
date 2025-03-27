@@ -4,7 +4,7 @@ import threading
 import time
 import tkinter as tk
 import webbrowser
-from tkinter import filedialog, messagebox
+from tkinter import messagebox
 
 import cv2
 import mss
@@ -12,10 +12,12 @@ import numpy as np
 
 
 class SystemAudioCapture:
-    def __init__(self):
+    def __init__(self, selected_apps: list[str], log_callback=None):
         self.null_sink_module: str | None = None
         self.loopback_module: str | None = None
         self.original_default_sink: str | None = None
+        self.apps_to_capture = selected_apps
+        self.log = log_callback if log_callback else print
 
     def get_real_sink(self) -> str:
         sinks = (
@@ -28,24 +30,26 @@ class SystemAudioCapture:
                 return line.split("\t")[1]
         raise RuntimeError("No real audio sink found.")
 
-    def move_firefox_to_record_sink(self) -> None:
+    def move_apps_to_record_sink(self) -> None:
         inputs = subprocess.check_output(["pactl", "list", "sink-inputs"]).decode()
-        current_input = None
         for block in inputs.split("Sink Input #"):
-            if 'application.name = "Firefox"' in block:
-                lines = block.strip().splitlines()
-                for line in lines:
-                    if line.strip().startswith("Sink Input"):
-                        current_input = line.strip().split("#")[-1]
-                        break
-                if not current_input:
-                    lines = block.splitlines()
-                    current_input = lines[0].strip()
-                subprocess.run(
-                    ["pactl", "move-sink-input", current_input, "record_sink"]
-                )
-                print(f"Moved Firefox (Sink Input #{current_input}) to record_sink")
-                break
+            for app in self.apps_to_capture:
+                if f'application.name = "{app}"' in block:
+                    lines = block.strip().splitlines()
+                    sink_input_id = None
+                    for line in lines:
+                        if line.strip().startswith("Sink Input"):
+                            sink_input_id = line.strip().split("#")[-1]
+                            break
+                    if not sink_input_id:
+                        sink_input_id = lines[0].strip()
+                    subprocess.run(
+                        ["pactl", "move-sink-input", sink_input_id, "record_sink"]
+                    )
+                    self.log(
+                        f"[AUDIO] Moved {app} (Sink Input #{sink_input_id}) to record_sink"
+                    )
+                    break
 
     def setup(self) -> None:
         self.original_default_sink = (
@@ -86,9 +90,7 @@ class SystemAudioCapture:
         )
 
         subprocess.run(["pactl", "set-default-sink", "record_sink"])
-
-        # Move Firefox audio to record_sink automatically
-        self.move_firefox_to_record_sink()
+        self.move_apps_to_record_sink()
 
     def start_recording(self, output_file: str) -> subprocess.Popen:
         return subprocess.Popen(
@@ -120,6 +122,13 @@ def merge_audio_video(video_path: str, audio_path: str, output_path: str) -> Non
             output_path,
         ]
     )
+
+
+def get_incremental_filename(base_name="output", extension=".mp4") -> str:
+    i = 1
+    while os.path.exists(f"{base_name}_{i}{extension}"):
+        i += 1
+    return f"{base_name}_{i}{extension}"
 
 
 class ScreenRecorder:
@@ -161,29 +170,73 @@ class RecorderApp:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
         self.root.title("Screen + System Audio Recorder")
+        self.root.configure(bg="#1e1e1e")
+
         self.recorder: ScreenRecorder | None = None
-        self.audio_capture = SystemAudioCapture()
+        self.audio_capture: SystemAudioCapture | None = None
         self.audio_proc: subprocess.Popen | None = None
         self.video_file: str | None = None
         self.audio_file = "audio.wav"
         self.final_file: str | None = None
+
+        self.app_checkboxes = {}
+        self.app_list = [
+            "Firefox",
+            "zoom",
+            "Spotify",
+            "discord",
+            "obs",
+            "chromium",
+            "brave",
+        ]
+
+        self.log_text = tk.StringVar(value="Ready")
         self._build_ui()
 
     def _build_ui(self) -> None:
-        tk.Label(self.root, text="FPS:").grid(row=0, column=0)
-        self.fps_entry = tk.Entry(self.root)
+        label_style = {"bg": "#1e1e1e", "fg": "#ffffff"}
+        entry_style = {"bg": "#2e2e2e", "fg": "#ffffff", "insertbackground": "white"}
+
+        tk.Label(self.root, text="FPS:", **label_style).grid(
+            row=0, column=0, sticky="w"
+        )
+        self.fps_entry = tk.Entry(self.root, **entry_style)
         self.fps_entry.insert(0, "20")
-        self.fps_entry.grid(row=0, column=1)
+        self.fps_entry.grid(row=0, column=1, sticky="w")
 
-        self.status = tk.Label(self.root, text="Ready")
-        self.status.grid(row=1, column=0, columnspan=2, pady=5)
+        tk.Label(self.root, text="Capture Audio From:", **label_style).grid(
+            row=1, column=0, columnspan=2, sticky="w"
+        )
+        for idx, app in enumerate(self.app_list):
+            var = tk.BooleanVar(value=True)
+            chk = tk.Checkbutton(
+                self.root,
+                text=app,
+                variable=var,
+                bg="#1e1e1e",
+                fg="#cccccc",
+                selectcolor="#2e2e2e",
+                activebackground="#333333",
+            )
+            chk.grid(row=2 + idx // 2, column=idx % 2, sticky="w")
+            self.app_checkboxes[app] = var
 
-        tk.Button(self.root, text="Start Recording", command=self.start_recording).grid(
-            row=2, column=0
+        self.status = tk.Label(self.root, textvariable=self.log_text, **label_style)
+        self.status.grid(
+            row=2 + len(self.app_list) // 2, column=0, columnspan=2, pady=10, sticky="w"
         )
-        tk.Button(self.root, text="Stop Recording", command=self.stop_recording).grid(
-            row=2, column=1
-        )
+
+        btn_style = {"bg": "#3a3a3a", "fg": "white", "activebackground": "#5a5a5a"}
+        tk.Button(
+            self.root, text="Start Recording", command=self.start_recording, **btn_style
+        ).grid(row=3 + len(self.app_list) // 2, column=0)
+        tk.Button(
+            self.root, text="Stop Recording", command=self.stop_recording, **btn_style
+        ).grid(row=3 + len(self.app_list) // 2, column=1)
+
+    def _log(self, msg: str) -> None:
+        print(msg)
+        self.log_text.set(msg)
 
     def start_recording(self) -> None:
         try:
@@ -192,7 +245,9 @@ class RecorderApp:
             messagebox.showerror("Invalid FPS", "Please enter a valid FPS value.")
             return
 
+        selected_apps = [app for app, var in self.app_checkboxes.items() if var.get()]
         self.recorder = ScreenRecorder(fps)
+        self.audio_capture = SystemAudioCapture(selected_apps, log_callback=self._log)
         self.audio_capture.setup()
         self.audio_proc = self.audio_capture.start_recording(self.audio_file)
 
@@ -200,7 +255,7 @@ class RecorderApp:
             self.video_file = self.recorder.start_recording()
 
         threading.Thread(target=_record, daemon=True).start()
-        self.status.config(text="Recording...")
+        self._log("Recording...")
 
     def stop_recording(self) -> None:
         if self.recorder:
@@ -208,19 +263,17 @@ class RecorderApp:
         if self.audio_proc:
             self.audio_proc.terminate()
             self.audio_proc.wait()
-        self.audio_capture.cleanup()
+        if self.audio_capture:
+            self.audio_capture.cleanup()
 
         if self.video_file:
-            file_path = filedialog.asksaveasfilename(
-                defaultextension=".mp4", filetypes=[("MP4 files", "*.mp4")]
-            )
-            if file_path:
-                self.final_file = file_path
-                merge_audio_video(self.video_file, self.audio_file, self.final_file)
-                self.status.config(text=f"Saved to {self.final_file}")
-                messagebox.showinfo("Done", f"Recording saved to {self.final_file}")
-                folder = os.path.dirname(self.final_file)
-                webbrowser.open(f"file://{folder}")
+            default_name = get_incremental_filename()
+            merge_audio_video(self.video_file, self.audio_file, default_name)
+            self.final_file = default_name
+            self._log(f"Saved to {self.final_file}")
+            messagebox.showinfo("Done", f"Recording saved to {self.final_file}")
+            folder = os.path.dirname(os.path.abspath(self.final_file))
+            webbrowser.open(f"file://{folder}")
 
 
 if __name__ == "__main__":
