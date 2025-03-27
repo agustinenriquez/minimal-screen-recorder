@@ -1,7 +1,7 @@
-[Desktop Entry]
+[DesktopEntry]
 Type=Application
 Name=Screen Recorder
-Exec=/home/m0tz/.local/bin/screenrec
+Exec=env HOME=$HOME $HOME/.local/bin/screenrec
 Icon=utilities-terminal
 Terminal=false
 Categories=AudioVideo;
