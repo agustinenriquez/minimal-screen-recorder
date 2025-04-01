@@ -270,7 +270,7 @@ class RecorderApp:
             merge_audio_video(self.video_file, self.audio_file, default_name)
             self.final_file = default_name
             self._log(f"Saved to {self.final_file}")
-            messagebox.showinfo("Done", f"Recording saved to {self.final_file}")
+            # messagebox.showinfo("Done", f"Recording saved to {self.final_file}")
 
 
 def main():
