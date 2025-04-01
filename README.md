@@ -78,4 +78,4 @@ snapcraft upload screenrec-lite_1.0.0_amd64.snap --release=stable
 
 📝 License
 
-MIT © Carlos Agustín Enríquez (https://github.com/m0tz)
+MIT © Carlos Agustín Enríquez (https://github.com/agustinenriquez)
