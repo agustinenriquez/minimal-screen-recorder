@@ -196,6 +196,7 @@ class RecorderApp:
         label_style = {"bg": "#1e1e1e", "fg": "#ffffff"}
         entry_style = {"bg": "#2e2e2e", "fg": "#ffffff", "insertbackground": "white"}
 
+        # Grid configuration
         tk.Label(self.root, text="FPS:", **label_style).grid(
             row=0, column=0, sticky="w"
         )
@@ -203,6 +204,7 @@ class RecorderApp:
         self.fps_entry.insert(0, "20")
         self.fps_entry.grid(row=0, column=1, sticky="w")
 
+        # Capture audio from
         tk.Label(self.root, text="Capture Audio From:", **label_style).grid(
             row=1, column=0, columnspan=2, sticky="w"
         )
@@ -226,6 +228,7 @@ class RecorderApp:
         )
 
         btn_style = {"bg": "#3a3a3a", "fg": "white", "activebackground": "#5a5a5a"}
+        # Buttons
         tk.Button(
             self.root, text="Start Recording", command=self.start_recording, **btn_style
         ).grid(row=3 + len(self.app_list) // 2, column=0)
@@ -271,6 +274,17 @@ class RecorderApp:
             self.final_file = default_name
             self._log(f"Saved to {self.final_file}")
             # messagebox.showinfo("Done", f"Recording saved to {self.final_file}")
+        # Delete temporary files
+        if os.path.exists(self.video_file):
+            try:
+                os.remove(self.video_file)
+            except PermissionError:
+                self._log("Video file is still in use, cannot delete.")
+        if os.path.exists(self.audio_file):
+            try:
+                os.remove(self.audio_file)
+            except PermissionError:
+                self._log("Audio file is still in use, cannot delete.")
 
 
 def main():
