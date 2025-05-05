@@ -105,8 +105,8 @@ class SystemAudioCapture:
             subprocess.run(["pactl", "unload-module", self.null_sink_module])
 
 
-def merge_audio_video(video_path: str, audio_path: str, output_path: str) -> None:
-    subprocess.run(
+def merge_audio_video(video_path: str, audio_path: str, output_path: str) -> bool:
+    result = subprocess.run(
         [
             "ffmpeg",
             "-y",
@@ -119,8 +119,11 @@ def merge_audio_video(video_path: str, audio_path: str, output_path: str) -> Non
             "-c:a",
             "aac",
             output_path,
-        ]
+        ],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
     )
+    return result.returncode == 0
 
 
 def get_incremental_filename(base_name="output", extension=".mp4") -> str:
@@ -175,7 +178,7 @@ class ScreenRecorder:
                     "left": monitor["left"],
                     "top": monitor["top"],
                 }
-                for monitor in monitors[1:]  # Skip index 0 (virtual full area)
+                for monitor in monitors[1:]
             ]
 
 
@@ -214,7 +217,6 @@ class RecorderApp:
         label_style = {"bg": "#1e1e1e", "fg": "#ffffff"}
         entry_style = {"bg": "#2e2e2e", "fg": "#ffffff", "insertbackground": "white"}
 
-        # FPS input
         tk.Label(self.root, text="FPS:", **label_style).grid(
             row=0, column=0, sticky="w"
         )
@@ -222,9 +224,11 @@ class RecorderApp:
         self.fps_entry.insert(0, "20")
         self.fps_entry.grid(row=0, column=1, sticky="w")
 
-        # Capture audio from
+        # Screen selector comes just below FPS
+        # (handled in _populate_screens())
+
         tk.Label(self.root, text="Capture Audio From:", **label_style).grid(
-            row=1, column=0, columnspan=2, sticky="w"
+            row=2, column=0, columnspan=2, sticky="w"
         )
         for idx, app in enumerate(self.app_list):
             var = tk.BooleanVar(value=True)
@@ -237,21 +241,21 @@ class RecorderApp:
                 selectcolor="#2e2e2e",
                 activebackground="#333333",
             )
-            chk.grid(row=2 + idx // 2, column=idx % 2, sticky="w")
+            chk.grid(row=3 + idx // 2, column=idx % 2, sticky="w")
             self.app_checkboxes[app] = var
 
         self.status = tk.Label(self.root, textvariable=self.log_text, **label_style)
         self.status.grid(
-            row=2 + len(self.app_list) // 2, column=0, columnspan=2, pady=10, sticky="w"
+            row=3 + len(self.app_list) // 2, column=0, columnspan=2, pady=10, sticky="w"
         )
 
         btn_style = {"bg": "#3a3a3a", "fg": "white", "activebackground": "#5a5a5a"}
         tk.Button(
             self.root, text="Start Recording", command=self.start_recording, **btn_style
-        ).grid(row=3 + len(self.app_list) // 2, column=0)
+        ).grid(row=4 + len(self.app_list) // 2, column=0)
         tk.Button(
             self.root, text="Stop Recording", command=self.stop_recording, **btn_style
-        ).grid(row=3 + len(self.app_list) // 2, column=1)
+        ).grid(row=4 + len(self.app_list) // 2, column=1)
 
     def _populate_screens(self):
         screen_options = [
@@ -259,11 +263,11 @@ class RecorderApp:
             for i, s in enumerate(self.screens)
         ]
         tk.Label(self.root, text="Select Screen:", bg="#1e1e1e", fg="white").grid(
-            row=0, column=2, sticky="w"
+            row=1, column=0, sticky="w"
         )
         screen_menu = ttk.Combobox(self.root, values=screen_options, state="readonly")
         screen_menu.current(0)
-        screen_menu.grid(row=0, column=3, sticky="w")
+        screen_menu.grid(row=1, column=1, sticky="w")
         screen_menu.bind(
             "<<ComboboxSelected>>",
             lambda e: self.selected_screen_index.set(screen_menu.current() + 1),
@@ -305,20 +309,17 @@ class RecorderApp:
 
         if self.video_file:
             default_name = get_incremental_filename()
-            merge_audio_video(self.video_file, self.audio_file, default_name)
-            self.final_file = default_name
-            self._log(f"Saved to {self.final_file}")
-
-        if os.path.exists(self.video_file):
-            try:
-                os.remove(self.video_file)
-            except PermissionError:
-                self._log("Video file is still in use, cannot delete.")
-        if os.path.exists(self.audio_file):
-            try:
-                os.remove(self.audio_file)
-            except PermissionError:
-                self._log("Audio file is still in use, cannot delete.")
+            success = merge_audio_video(self.video_file, self.audio_file, default_name)
+            if success:
+                self.final_file = default_name
+                self._log(f"Recording saved as {self.final_file}")
+                for f in [self.video_file, self.audio_file]:
+                    try:
+                        os.remove(f)
+                    except Exception as e:
+                        self._log(f"Error deleting file {f}: {e}")
+            else:
+                self._log("Failed to merge audio and video files.")
 
 
 def main():
