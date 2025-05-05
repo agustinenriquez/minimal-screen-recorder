@@ -3,7 +3,7 @@ import subprocess
 import threading
 import time
 import tkinter as tk
-from tkinter import messagebox
+from tkinter import messagebox, ttk
 
 import cv2
 import mss
@@ -131,14 +131,15 @@ def get_incremental_filename(base_name="output", extension=".mp4") -> str:
 
 
 class ScreenRecorder:
-    def __init__(self, fps: float):
+    def __init__(self, fps: float, monitor_index: int = 1):
         self.fps = fps
+        self.monitor_index = monitor_index
         self.recording = False
         self.output_file = f"screen_{int(time.time())}.avi"
 
     def _get_screen_size(self) -> tuple[int, int]:
         with mss.mss() as sct:
-            mon = sct.monitors[0]
+            mon = sct.monitors[self.monitor_index]
             return mon["width"], mon["height"]
 
     def start_recording(self) -> str:
@@ -150,7 +151,7 @@ class ScreenRecorder:
         delay = 1.0 / self.fps
 
         with mss.mss() as sct:
-            monitor = sct.monitors[0]
+            monitor = sct.monitors[self.monitor_index]
             while self.recording:
                 start_time = time.time()
                 frame = np.array(sct.grab(monitor))[:, :, :3]
@@ -163,6 +164,19 @@ class ScreenRecorder:
 
     def stop(self) -> None:
         self.recording = False
+
+    def detect_screens(self) -> list[dict]:
+        with mss.mss() as sct:
+            monitors = sct.monitors
+            return [
+                {
+                    "width": monitor["width"],
+                    "height": monitor["height"],
+                    "left": monitor["left"],
+                    "top": monitor["top"],
+                }
+                for monitor in monitors[1:]  # Skip index 0 (virtual full area)
+            ]
 
 
 class RecorderApp:
@@ -190,13 +204,17 @@ class RecorderApp:
         ]
 
         self.log_text = tk.StringVar(value="Ready")
+
         self._build_ui()
+        self.screens = ScreenRecorder(1).detect_screens()
+        self.selected_screen_index = tk.IntVar(value=1)
+        self._populate_screens()
 
     def _build_ui(self) -> None:
         label_style = {"bg": "#1e1e1e", "fg": "#ffffff"}
         entry_style = {"bg": "#2e2e2e", "fg": "#ffffff", "insertbackground": "white"}
 
-        # Grid configuration
+        # FPS input
         tk.Label(self.root, text="FPS:", **label_style).grid(
             row=0, column=0, sticky="w"
         )
@@ -228,13 +246,28 @@ class RecorderApp:
         )
 
         btn_style = {"bg": "#3a3a3a", "fg": "white", "activebackground": "#5a5a5a"}
-        # Buttons
         tk.Button(
             self.root, text="Start Recording", command=self.start_recording, **btn_style
         ).grid(row=3 + len(self.app_list) // 2, column=0)
         tk.Button(
             self.root, text="Stop Recording", command=self.stop_recording, **btn_style
         ).grid(row=3 + len(self.app_list) // 2, column=1)
+
+    def _populate_screens(self):
+        screen_options = [
+            f"Screen {i + 1}: {s['width']}x{s['height']} at ({s['left']},{s['top']})"
+            for i, s in enumerate(self.screens)
+        ]
+        tk.Label(self.root, text="Select Screen:", bg="#1e1e1e", fg="white").grid(
+            row=0, column=2, sticky="w"
+        )
+        screen_menu = ttk.Combobox(self.root, values=screen_options, state="readonly")
+        screen_menu.current(0)
+        screen_menu.grid(row=0, column=3, sticky="w")
+        screen_menu.bind(
+            "<<ComboboxSelected>>",
+            lambda e: self.selected_screen_index.set(screen_menu.current() + 1),
+        )
 
     def _log(self, msg: str) -> None:
         print(msg)
@@ -248,7 +281,9 @@ class RecorderApp:
             return
 
         selected_apps = [app for app, var in self.app_checkboxes.items() if var.get()]
-        self.recorder = ScreenRecorder(fps)
+        self.recorder = ScreenRecorder(
+            fps, monitor_index=self.selected_screen_index.get()
+        )
         self.audio_capture = SystemAudioCapture(selected_apps, log_callback=self._log)
         self.audio_capture.setup()
         self.audio_proc = self.audio_capture.start_recording(self.audio_file)
@@ -273,8 +308,7 @@ class RecorderApp:
             merge_audio_video(self.video_file, self.audio_file, default_name)
             self.final_file = default_name
             self._log(f"Saved to {self.final_file}")
-            # messagebox.showinfo("Done", f"Recording saved to {self.final_file}")
-        # Delete temporary files
+
         if os.path.exists(self.video_file):
             try:
                 os.remove(self.video_file)
