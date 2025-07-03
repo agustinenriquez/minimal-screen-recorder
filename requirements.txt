@@ -1,21 +1,14 @@
-black==25.1.0
-cfgv==3.4.0
-click==8.1.8
-distlib==0.3.9
-filelock==3.18.0
-flake8==7.1.2
-identify==2.6.9
-mccabe==0.7.0
-mss==10.0.0
-mypy-extensions==1.0.0
-nodeenv==1.9.1
-numpy==2.2.4
-opencv-python==4.11.0.86
-packaging==24.2
-pathspec==0.12.1
-platformdirs==4.3.7
-pre_commit==4.2.0
-pycodestyle==2.12.1
-pyflakes==3.2.0
-PyYAML==6.0.2
-virtualenv==20.29.3
+# Screen Recorder Dependencies
+
+# Core recording libraries
+opencv-python>=4.8.0
+mss>=9.0.0
+numpy>=1.24.0
+
+# Audio processing
+# Note: PulseAudio (pactl) and FFmpeg are system dependencies
+# Install with: sudo apt install pulseaudio-utils ffmpeg
+
+# Optional dependencies for enhanced features
+Pillow>=10.0.0  # For additional image processing
+psutil>=5.9.0   # For system monitoring and process management
