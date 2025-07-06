@@ -22,8 +22,8 @@
   "theme": "dark",
   "video_codec": "XVID",
   "video_quality": 95,
-  "window_height": 600,
-  "window_width": 400,
-  "window_x": 22,
-  "window_y": 87
+  "window_height": 343,
+  "window_width": 446,
+  "window_x": 100,
+  "window_y": 100
 }

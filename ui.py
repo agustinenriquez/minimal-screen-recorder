@@ -1,9 +1,9 @@
 """Enhanced UI for the screen recorder with better UX and controls."""
 
+import subprocess
 import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
-from typing import Optional
 
 from audio import AudioCaptureError, SystemAudioCapture
 from config import ConfigManager
@@ -397,7 +397,7 @@ class RecorderApp:
         # Initialize recording components
         self.recorder: ScreenRecorder | None = None
         self.audio_capture: SystemAudioCapture | None = None
-        self.audio_proc: Optional = None
+        self.audio_proc: subprocess.Popen | None = None
         self.video_file: str | None = None
         self.audio_file = "temp_audio.wav"
         self.final_file: str | None = None
@@ -489,21 +489,37 @@ class RecorderApp:
             self.screen_combo.grid(row=row, column=1, columnspan=2, sticky="w", pady=5)
             row += 1
 
-        # Audio apps section
-        tk.Label(main_frame, text="Audio Sources:", **label_style).grid(
+        # Audio apps section with hide/show button
+        audio_header_frame = tk.Frame(main_frame, bg="#1e1e1e")
+        audio_header_frame.grid(
             row=row, column=0, columnspan=3, sticky="w", pady=(15, 5)
         )
+
+        tk.Label(audio_header_frame, text="Audio Sources:", **label_style).pack(
+            side=tk.LEFT
+        )
+
+        # Hide/Show sources button
+        self.sources_visible = tk.BooleanVar(value=False)
+        self.toggle_sources_btn = tk.Button(
+            audio_header_frame,
+            text="Show Sources",
+            command=self._toggle_sources_visibility,
+            **btn_style,
+            font=("Arial", 8),
+        )
+        self.toggle_sources_btn.pack(side=tk.LEFT, padx=(10, 0))
         row += 1
 
         # Audio apps checkboxes
-        apps_frame = tk.Frame(main_frame, bg="#1e1e1e")
-        apps_frame.grid(row=row, column=0, columnspan=3, sticky="w", pady=5)
+        self.apps_frame = tk.Frame(main_frame, bg="#1e1e1e")
+        self.apps_frame.grid(row=row, column=0, columnspan=3, sticky="w", pady=5)
 
         available_apps = self.config_manager.get_available_apps()
         for idx, app in enumerate(available_apps):
             var = tk.BooleanVar(value=app in self.config.selected_apps)
             chk = tk.Checkbutton(
-                apps_frame,
+                self.apps_frame,
                 text=app,
                 variable=var,
                 bg="#1e1e1e",
@@ -513,6 +529,9 @@ class RecorderApp:
             )
             chk.grid(row=idx // 3, column=idx % 3, sticky="w", padx=5)
             self.app_checkboxes[app] = var
+
+        # Hide sources by default
+        self.apps_frame.grid_remove()
         row += 1
 
         # Status and progress
@@ -576,6 +595,19 @@ class RecorderApp:
         """Handle screen selection."""
         if hasattr(self, "screen_combo"):
             self.selected_screen_index.set(self.screen_combo.current() + 1)
+
+    def _toggle_sources_visibility(self):
+        """Toggle the visibility of audio sources checkboxes."""
+        if self.sources_visible.get():
+            # Hide sources
+            self.apps_frame.grid_remove()
+            self.sources_visible.set(False)
+            self.toggle_sources_btn.config(text="Show Sources")
+        else:
+            # Show sources
+            self.apps_frame.grid()
+            self.sources_visible.set(True)
+            self.toggle_sources_btn.config(text="Hide Sources")
 
     def _log(self, msg: str):
         """Update log display."""
@@ -711,32 +743,52 @@ class RecorderApp:
 
         self._log("Stopping recording...")
 
-        try:
-            # Stop recording
-            self.recording_timer.stop()
-            video_output = self.recorder.stop_recording()
+        # Update UI immediately to show responsiveness
+        self.start_btn.config(state=tk.DISABLED)
+        self.stop_btn.config(state=tk.DISABLED, text="Stopping...")
+        self.root.update_idletasks()
 
-            # Stop audio
-            if self.audio_proc:
-                self.audio_proc.terminate()
-                self.audio_proc.wait()
-                self.audio_proc = None
+        def _stop_recording_thread():
+            """Handle the actual stopping in a separate thread to keep UI responsive."""
+            try:
+                # Stop recording
+                self.recording_timer.stop()
+                video_output = self.recorder.stop_recording()
 
-            if self.audio_capture:
-                self.audio_capture.cleanup()
-                self.audio_capture = None
+                # Stop audio
+                if self.audio_proc:
+                    self.audio_proc.terminate()
+                    self.audio_proc.wait()
+                    self.audio_proc = None
 
-            # Process output
-            if video_output:
-                final_output = self._process_output(video_output)
-                if final_output:
-                    self._log(f"Recording saved: {final_output}")
+                if self.audio_capture:
+                    self.audio_capture.cleanup()
+                    self.audio_capture = None
 
-        except Exception as e:
-            self.logger.error(f"Error stopping recording: {e}")
-            messagebox.showerror("Error", f"Error stopping recording: {e}")
-        finally:
-            self._cleanup_recording()
+                # Process output
+                if video_output:
+                    final_output = self._process_output(video_output)
+                    if final_output:
+                        self.root.after(
+                            0, lambda: self._log(f"Recording saved: {final_output}")
+                        )
+
+            except Exception as e:
+                error_msg = f"Error stopping recording: {e}"
+                self.logger.error(error_msg)
+                self.root.after(
+                    0,
+                    lambda: messagebox.showerror("Error", error_msg),
+                )
+            finally:
+                # Schedule UI cleanup on main thread
+                self.root.after(0, self._cleanup_recording)
+
+        # Start the stopping process in a separate thread
+        import threading
+
+        stop_thread = threading.Thread(target=_stop_recording_thread, daemon=True)
+        stop_thread.start()
 
     def _process_output(self, video_file: str) -> str | None:
         """Process the recorded output (merge audio/video, cleanup)."""
@@ -829,7 +881,7 @@ class RecorderApp:
         """Clean up recording state."""
         # Update UI
         self.start_btn.config(state=tk.NORMAL)
-        self.stop_btn.config(state=tk.DISABLED)
+        self.stop_btn.config(state=tk.DISABLED, text="⏹️ Stop Recording")
         self.progress_bar.stop()
         self.progress_bar.grid_remove()
 

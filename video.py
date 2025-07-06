@@ -269,11 +269,18 @@ class ScreenRecorder:
         self.recording = False
         self.paused = False
 
-        # Wait for recording thread to finish
+        # Wait for recording thread to finish with a shorter timeout
         if self.recording_thread and self.recording_thread.is_alive():
-            self.recording_thread.join(timeout=5.0)
+            self.recording_thread.join(timeout=2.0)
             if self.recording_thread.is_alive():
                 self.callback_logger.warning("Recording thread did not stop gracefully")
+                # Force cleanup if thread is still running
+                if self.video_writer:
+                    try:
+                        self.video_writer.release()
+                        self.video_writer = None
+                    except Exception as e:
+                        self.callback_logger.error(f"Error releasing video writer: {e}")
 
         output_file = self.output_file
         self.output_file = None

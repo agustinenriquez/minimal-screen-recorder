@@ -24,8 +24,8 @@ class RecorderConfig:
 
     # UI settings
     theme: str = "dark"
-    window_width: int = 400
-    window_height: int = 600
+    window_width: int = 446
+    window_height: int = 343
     remember_window_position: bool = True
     window_x: int = 100
     window_y: int = 100
