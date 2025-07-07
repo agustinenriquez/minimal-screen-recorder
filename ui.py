@@ -781,7 +781,7 @@ class RecorderApp:
                     lambda: messagebox.showerror("Error", error_msg),
                 )
             finally:
-                # Schedule UI cleanup on main thread
+                # Always schedule UI cleanup on main thread, regardless of success or failure
                 self.root.after(0, self._cleanup_recording)
 
         # Start the stopping process in a separate thread
@@ -789,6 +789,15 @@ class RecorderApp:
 
         stop_thread = threading.Thread(target=_stop_recording_thread, daemon=True)
         stop_thread.start()
+
+        # Add a backup cleanup after a reasonable timeout (10 seconds)
+        # This ensures buttons are re-enabled even if something goes wrong
+        def _backup_cleanup():
+            if self.start_btn.cget("state") == tk.DISABLED:
+                self.logger.warning("Backup cleanup triggered - re-enabling buttons")
+                self._cleanup_recording()
+
+        self.root.after(10000, _backup_cleanup)
 
     def _process_output(self, video_file: str) -> str | None:
         """Process the recorded output (merge audio/video, cleanup)."""
