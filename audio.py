@@ -177,14 +177,14 @@ class SystemAudioCapture:
             real_sink = self.get_real_sink()
             self.callback_logger.debug(f"Real sink: {real_sink}")
 
-            # Create loopback from record sink to real sink
+            # Create loopback from record sink to the original default sink (Focusrite)
             result = self._run_pactl_command(
                 [
                     "pactl",
                     "load-module",
                     "module-loopback",
                     "source=record_sink.monitor",
-                    f"sink={real_sink}",
+                    f"sink={self.original_default_sink}",
                     "latency_msec=50",
                 ]
             )
@@ -193,8 +193,10 @@ class SystemAudioCapture:
                 f"Created loopback module: {self.loopback_module}"
             )
 
-            # Set record sink as default
-            self._run_pactl_command(["pactl", "set-default-sink", "record_sink"])
+            # Don't change the default sink - keep using Focusrite for output
+            self.callback_logger.info(
+                f"Keeping {self.original_default_sink} as default output"
+            )
 
             # Move existing apps to record sink
             moved_count = self.move_apps_to_record_sink()
@@ -254,16 +256,8 @@ class SystemAudioCapture:
         success = True
 
         try:
-            # Restore original default sink
-            if self.original_default_sink:
-                try:
-                    self._run_pactl_command(
-                        ["pactl", "set-default-sink", self.original_default_sink]
-                    )
-                    self.callback_logger.debug("Restored original default sink")
-                except AudioCaptureError as e:
-                    self.callback_logger.warning(f"Failed to restore default sink: {e}")
-                    success = False
+            # No need to restore default sink since we never changed it
+            self.callback_logger.debug("Default sink unchanged - no restoration needed")
 
             # Unload loopback module
             if self.loopback_module:
