@@ -1,6 +1,7 @@
 """Audio capture functionality for the screen recorder."""
 
 import logging
+import signal
 import subprocess
 import time
 from collections.abc import Callable
@@ -31,6 +32,8 @@ class SystemAudioCapture:
         self.sample_rate = sample_rate
         self.channels = channels
         self.is_setup = False
+        self.recording_process: subprocess.Popen | None = None
+        self.paused = False
 
         # Set up logging
         self.logger = logging.getLogger(__name__)
@@ -245,11 +248,56 @@ class SystemAudioCapture:
                 stderr = proc.stderr.read() if proc.stderr else "Unknown error"
                 raise AudioCaptureError(f"FFmpeg failed to start: {stderr}")
 
+            self.recording_process = proc
+            self.paused = False
             self.callback_logger.info("Audio recording started")
             return proc
 
         except Exception as e:
             raise AudioCaptureError(f"Failed to start audio recording: {e}")
+
+    def pause_recording(self) -> None:
+        """Pause/resume audio recording by sending SIGSTOP/SIGCONT to ffmpeg process."""
+        if not self.recording_process:
+            raise AudioCaptureError("No recording process to pause")
+
+        try:
+            if self.paused:
+                # Resume recording
+                self.recording_process.send_signal(signal.SIGCONT)
+                self.paused = False
+                self.callback_logger.info("Audio recording resumed")
+            else:
+                # Pause recording
+                self.recording_process.send_signal(signal.SIGSTOP)
+                self.paused = True
+                self.callback_logger.info("Audio recording paused")
+        except Exception as e:
+            self.callback_logger.error(f"Failed to pause/resume audio recording: {e}")
+            raise AudioCaptureError(f"Failed to pause/resume audio recording: {e}")
+
+    def stop_recording(self) -> None:
+        """Stop the audio recording process."""
+        if self.recording_process:
+            try:
+                # If paused, resume first so it can terminate properly
+                if self.paused:
+                    self.recording_process.send_signal(signal.SIGCONT)
+                    time.sleep(0.1)
+
+                self.recording_process.terminate()
+                self.recording_process.wait(timeout=5)
+                self.callback_logger.info("Audio recording stopped")
+            except subprocess.TimeoutExpired:
+                self.callback_logger.warning(
+                    "Audio recording process did not terminate, killing it"
+                )
+                self.recording_process.kill()
+            except Exception as e:
+                self.callback_logger.error(f"Error stopping audio recording: {e}")
+            finally:
+                self.recording_process = None
+                self.paused = False
 
     def cleanup(self) -> bool:
         """Clean up audio capture environment."""

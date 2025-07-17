@@ -553,6 +553,15 @@ class RecorderApp:
         )
         self.start_btn.pack(side=tk.LEFT, padx=5)
 
+        self.pause_btn = tk.Button(
+            buttons_frame,
+            text="⏸️ Pause",
+            command=self.pause_recording,
+            **btn_style,
+            state=tk.DISABLED,
+        )
+        self.pause_btn.pack(side=tk.LEFT, padx=5)
+
         self.stop_btn = tk.Button(
             buttons_frame,
             text="⏹️ Stop Recording",
@@ -629,6 +638,22 @@ class RecorderApp:
         """Pause/resume recording."""
         if self.recorder and self.recorder.recording:
             self.recorder.pause_recording()
+
+            # Pause/resume audio recording as well
+            if self.audio_capture:
+                try:
+                    self.audio_capture.pause_recording()
+                except AudioCaptureError as e:
+                    self.logger.warning(f"Audio pause/resume failed: {e}")
+
+            # Update UI
+            if self.recorder.paused:
+                self.pause_btn.config(text="▶️ Resume")
+                self._log("Recording paused")
+            else:
+                self.pause_btn.config(text="⏸️ Pause")
+                self._log("Recording resumed")
+
             if self.progress_window:
                 self.progress_window.set_paused(self.recorder.paused)
 
@@ -716,6 +741,7 @@ class RecorderApp:
 
             # Update UI
             self.start_btn.config(state=tk.DISABLED)
+            self.pause_btn.config(state=tk.NORMAL, text="⏸️ Pause")
             self.stop_btn.config(state=tk.NORMAL)
             self.progress_bar.grid(row=100, column=0, columnspan=3, sticky="ew", pady=5)
             self.progress_bar.start()
@@ -756,14 +782,13 @@ class RecorderApp:
                 video_output = self.recorder.stop_recording()
 
                 # Stop audio
-                if self.audio_proc:
-                    self.audio_proc.terminate()
-                    self.audio_proc.wait()
-                    self.audio_proc = None
-
                 if self.audio_capture:
+                    self.audio_capture.stop_recording()
                     self.audio_capture.cleanup()
                     self.audio_capture = None
+
+                if self.audio_proc:
+                    self.audio_proc = None
 
                 # Process output
                 if video_output:
@@ -890,6 +915,7 @@ class RecorderApp:
         """Clean up recording state."""
         # Update UI
         self.start_btn.config(state=tk.NORMAL)
+        self.pause_btn.config(state=tk.DISABLED, text="⏸️ Pause")
         self.stop_btn.config(state=tk.DISABLED, text="⏹️ Stop Recording")
         self.progress_bar.stop()
         self.progress_bar.grid_remove()
