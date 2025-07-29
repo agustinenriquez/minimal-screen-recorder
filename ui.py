@@ -399,7 +399,7 @@ class RecorderApp:
         self.audio_capture: SystemAudioCapture | None = None
         self.audio_proc: subprocess.Popen | None = None
         self.video_file: str | None = None
-        self.audio_file = "temp_audio.wav"
+        self.audio_file: str | None = None
         self.final_file: str | None = None
         self.recording_timer = RecordingTimer()
 
@@ -712,6 +712,10 @@ class RecorderApp:
             if self.config.auto_increment_filename:
                 base_name = Path(self.config.output_directory) / "recording"
                 temp_video = f"{base_name}_temp.avi"
+                # Generate unique audio filename for each recording
+                import time
+
+                self.audio_file = f"temp_audio_{int(time.time())}.wav"
             else:
                 temp_video = filedialog.asksaveasfilename(
                     defaultextension=f".{self.config.output_format}",
@@ -727,6 +731,10 @@ class RecorderApp:
                 temp_video = temp_video.replace(
                     f".{self.config.output_format}", "_temp.avi"
                 )
+                # Generate unique audio filename for each recording
+                import time
+
+                self.audio_file = f"temp_audio_{int(time.time())}.wav"
 
             # Start audio recording first (it takes longer to initialize)
             if self.audio_capture:
@@ -843,7 +851,7 @@ class RecorderApp:
             )
             audio_size = (
                 Path(self.audio_file).stat().st_size
-                if Path(self.audio_file).exists()
+                if self.audio_file and Path(self.audio_file).exists()
                 else 0
             )
 
@@ -851,7 +859,11 @@ class RecorderApp:
             self._log(f"Audio file: {self.audio_file} ({audio_size} bytes)")
 
             # Merge audio and video if both exist
-            if Path(self.audio_file).exists() and Path(video_file).exists():
+            if (
+                self.audio_file
+                and Path(self.audio_file).exists()
+                and Path(video_file).exists()
+            ):
                 if video_size < 1000:  # Less than 1KB indicates a problem
                     self._log("WARNING: Video file is very small, may be corrupted")
 
@@ -878,7 +890,10 @@ class RecorderApp:
                     self._log(f"Final file: {final_output} ({final_size} bytes)")
 
                     # Clean up temporary files
-                    cleanup_temp_files([video_file, self.audio_file], self._log)
+                    temp_files = [video_file]
+                    if self.audio_file:
+                        temp_files.append(self.audio_file)
+                    cleanup_temp_files(temp_files, self._log)
                     return final_output
                 else:
                     # Keep original video file if merge failed
@@ -892,7 +907,7 @@ class RecorderApp:
                 missing_files = []
                 if not Path(video_file).exists():
                     missing_files.append("video")
-                if not Path(self.audio_file).exists():
+                if not self.audio_file or not Path(self.audio_file).exists():
                     missing_files.append("audio")
 
                 if missing_files:
