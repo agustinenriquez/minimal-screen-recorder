@@ -392,7 +392,7 @@ def merge_audio_video(
             cmd,
             capture_output=True,
             text=True,
-            timeout=300,  # 5 minute timeout
+            timeout=3600,  # 1 hour timeout for long recordings
         )
 
         if result.returncode == 0:
