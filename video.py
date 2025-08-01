@@ -366,7 +366,6 @@ def merge_audio_video(
                 "[delayed_video]" if audio_delay_ms < 0 else "0:v",
                 "-map",
                 audio_map,
-                "-shortest",
                 output_path,
             ]
         else:
