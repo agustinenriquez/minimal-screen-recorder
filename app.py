@@ -241,6 +241,7 @@ except ImportError as e:
             self.video_file: str | None = None
             self.audio_file = "audio.wav"
             self.final_file: str | None = None
+            self.last_saved_recording: str | None = None
 
             self.app_checkboxes = {}
             self.app_list = [
@@ -316,6 +317,17 @@ except ImportError as e:
                 **btn_style,
             ).grid(row=4 + len(self.app_list) // 2, column=1)
 
+            self.open_file_btn = tk.Button(
+                self.root,
+                text="📂 Open Recording",
+                command=self.open_last_recording,
+                **btn_style,
+                state=tk.DISABLED,
+            )
+            self.open_file_btn.grid(
+                row=5 + len(self.app_list) // 2, column=0, columnspan=2, pady=5
+            )
+
         def _populate_screens(self):
             screen_options = [
                 f"Screen {i + 1}: {s['width']}x{s['height']} at ({s['left']},{s['top']})"
@@ -379,6 +391,8 @@ except ImportError as e:
                 )
                 if success:
                     self.final_file = default_name
+                    self.last_saved_recording = default_name
+                    self.open_file_btn.config(state=tk.NORMAL)
                     self._log(f"Recording saved as {self.final_file}")
                     for f in [self.video_file, self.audio_file]:
                         try:
@@ -387,6 +401,97 @@ except ImportError as e:
                             self._log(f"Error deleting file {f}: {e}")
                 else:
                     self._log("Failed to merge audio and video files.")
+
+        def open_last_recording(self) -> None:
+            """Open the last saved recording file."""
+            if not self.last_saved_recording:
+                messagebox.showwarning("No Recording", "No recording file to open.")
+                return
+
+            if not os.path.exists(self.last_saved_recording):
+                messagebox.showerror(
+                    "File Not Found",
+                    f"Recording file not found:\n{self.last_saved_recording}",
+                )
+                return
+
+            try:
+                # Open the file with the default system application
+                import platform
+
+                system = platform.system()
+                if system == "Windows":
+                    os.startfile(self.last_saved_recording)
+                    self._log(
+                        f"Opened recording: {os.path.basename(self.last_saved_recording)}"
+                    )
+                elif system == "Darwin":  # macOS
+                    result = subprocess.run(
+                        ["open", self.last_saved_recording],
+                        capture_output=True,
+                        text=True,
+                    )
+                    if result.returncode == 0:
+                        self._log(
+                            f"Opened recording: {os.path.basename(self.last_saved_recording)}"
+                        )
+                    else:
+                        raise Exception(f"Command failed: {result.stderr}")
+                else:  # Linux and other Unix-like systems
+                    # Try multiple methods for Linux
+                    methods = [
+                        ["xdg-open", self.last_saved_recording],
+                        ["gnome-open", self.last_saved_recording],
+                        ["kde-open", self.last_saved_recording],
+                        ["vlc", self.last_saved_recording],
+                        ["mpv", self.last_saved_recording],
+                    ]
+
+                    success = False
+                    for method in methods:
+                        try:
+                            process = subprocess.Popen(
+                                method,
+                                stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL,
+                                start_new_session=True,
+                            )
+                            time.sleep(0.5)
+                            if process.poll() is None or process.returncode == 0:
+                                success = True
+                                self._log(
+                                    f"Opened recording with {method[0]}: {os.path.basename(self.last_saved_recording)}"
+                                )
+                                break
+                        except (FileNotFoundError, Exception):
+                            continue
+
+                    if not success:
+                        # Open folder as fallback
+                        try:
+                            subprocess.Popen(
+                                [
+                                    "xdg-open",
+                                    os.path.dirname(self.last_saved_recording),
+                                ],
+                                stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL,
+                                start_new_session=True,
+                            )
+                            self._log(
+                                f"Opened folder containing: {os.path.basename(self.last_saved_recording)}"
+                            )
+                        except Exception:
+                            raise Exception(
+                                f"Could not open file or folder: {self.last_saved_recording}"
+                            )
+
+            except Exception as e:
+                self._log(f"Failed to open recording: {e}")
+                messagebox.showerror(
+                    "Error",
+                    f"Failed to open recording automatically.\n\nFile: {self.last_saved_recording}\n\nError: {e}",
+                )
 
     def main():
         """Fallback main function for basic mode."""

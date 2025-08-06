@@ -401,6 +401,7 @@ class RecorderApp:
         self.video_file: str | None = None
         self.audio_file: str | None = None
         self.final_file: str | None = None
+        self.last_saved_recording: str | None = None
         self.recording_timer = RecordingTimer()
 
         # UI components
@@ -576,6 +577,15 @@ class RecorderApp:
         )
         self.settings_btn.pack(side=tk.LEFT, padx=5)
 
+        self.open_file_btn = tk.Button(
+            buttons_frame,
+            text="📂 Open Recording",
+            command=self.open_last_recording,
+            **btn_style,
+            state=tk.DISABLED,
+        )
+        self.open_file_btn.pack(side=tk.LEFT, padx=5)
+
         row += 1
 
         # Progress bar (initially hidden)
@@ -585,7 +595,7 @@ class RecorderApp:
         )
 
         # Keyboard shortcuts help
-        help_text = "Shortcuts: F1=Start/Stop, F2=Pause, F3=Settings, Esc=Stop"
+        help_text = "Shortcuts: F1=Start/Stop, F2=Pause, F3=Settings, F4=Open Recording, Esc=Stop"
         tk.Label(main_frame, text=help_text, **label_style, font=("Arial", 8)).grid(
             row=row, column=0, columnspan=3, sticky="w", pady=(20, 0)
         )
@@ -595,6 +605,7 @@ class RecorderApp:
         self.root.bind("<F1>", lambda e: self.toggle_recording())
         self.root.bind("<F2>", lambda e: self.pause_recording())
         self.root.bind("<F3>", lambda e: self.open_settings())
+        self.root.bind("<F4>", lambda e: self.open_last_recording())
         self.root.bind("<Escape>", lambda e: self.stop_recording())
 
         # Make sure window can receive focus
@@ -802,9 +813,13 @@ class RecorderApp:
                 if video_output:
                     final_output = self._process_output(video_output)
                     if final_output:
-                        self.root.after(
-                            0, lambda: self._log(f"Recording saved: {final_output}")
-                        )
+
+                        def _update_ui_with_saved_recording():
+                            self.last_saved_recording = final_output
+                            self.open_file_btn.config(state=tk.NORMAL)
+                            self._log(f"Recording saved: {final_output}")
+
+                        self.root.after(0, _update_ui_with_saved_recording)
 
             except Exception as e:
                 error_msg = f"Error stopping recording: {e}"
@@ -946,6 +961,152 @@ class RecorderApp:
     def open_settings(self):
         """Open settings window."""
         SettingsWindow(self.root, self.config_manager)
+
+    def open_last_recording(self):
+        """Open the last saved recording file."""
+        if not self.last_saved_recording:
+            messagebox.showwarning("No Recording", "No recording file to open.")
+            return
+
+        self._log(f"Attempting to open file: {self.last_saved_recording}")
+        self._log(f"File exists: {Path(self.last_saved_recording).exists()}")
+        self._log(
+            f"File size: {Path(self.last_saved_recording).stat().st_size if Path(self.last_saved_recording).exists() else 'N/A'} bytes"
+        )
+
+        if not Path(self.last_saved_recording).exists():
+            messagebox.showerror(
+                "File Not Found",
+                f"Recording file not found:\n{self.last_saved_recording}",
+            )
+            return
+
+        try:
+            # Open the file with the default system application
+            import os
+            import platform
+
+            system = platform.system()
+            if system == "Windows":
+                os.startfile(self.last_saved_recording)
+                self._log(f"Opened recording: {Path(self.last_saved_recording).name}")
+            elif system == "Darwin":  # macOS
+                result = subprocess.run(
+                    ["open", self.last_saved_recording], capture_output=True, text=True
+                )
+                if result.returncode == 0:
+                    self._log(
+                        f"Opened recording: {Path(self.last_saved_recording).name}"
+                    )
+                else:
+                    raise Exception(
+                        f"Command failed with return code {result.returncode}: {result.stderr}"
+                    )
+            else:  # Linux and other Unix-like systems
+                # Try multiple methods for Linux
+                methods = [
+                    [
+                        "/usr/bin/vlc",
+                        "--intf",
+                        "qt",
+                        self.last_saved_recording,
+                    ],  # VLC with Qt interface (full path)
+                    [
+                        "/usr/bin/vlc",
+                        self.last_saved_recording,
+                    ],  # Standard VLC (full path)
+                    ["vlc", self.last_saved_recording],  # VLC from PATH
+                    ["mpv", self.last_saved_recording],  # MPV player
+                    [
+                        "xdg-open",
+                        self.last_saved_recording,
+                    ],  # System default (may have Qt issues)
+                    ["gnome-open", self.last_saved_recording],
+                    ["kde-open", self.last_saved_recording],
+                ]
+
+                success = False
+                for method in methods:
+                    try:
+                        self._log(f"Trying to open with: {' '.join(method)}")
+
+                        # Create a clean environment to avoid Qt conflicts
+                        clean_env = os.environ.copy()
+                        # Remove problematic Qt plugin paths that might interfere
+                        qt_vars_to_remove = [
+                            "QT_PLUGIN_PATH",
+                            "QT_QPA_PLATFORM_PLUGIN_PATH",
+                        ]
+                        for var in qt_vars_to_remove:
+                            clean_env.pop(var, None)
+
+                        # Use Popen to avoid blocking and allow the application to start
+                        process = subprocess.Popen(
+                            method,
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE,
+                            start_new_session=True,
+                            env=clean_env,
+                        )
+                        # Give it a moment to start
+                        import time
+
+                        time.sleep(1.0)
+
+                        # Check if process is still running (didn't immediately fail)
+                        return_code = process.poll()
+                        if return_code is None:
+                            success = True
+                            self._log(
+                                f"Successfully opened recording with {method[0]}: {Path(self.last_saved_recording).name}"
+                            )
+                            break
+                        else:
+                            stdout, stderr = process.communicate()
+                            self._log(
+                                f"{method[0]} failed with return code {return_code}: {stderr.decode() if stderr else 'No error message'}"
+                            )
+                    except FileNotFoundError as e:
+                        self._log(f"{method[0]} not found: {e}")
+                        continue
+                    except Exception as e:
+                        self._log(f"{method[0]} failed with exception: {e}")
+                        continue
+
+                if not success:
+                    # Last resort: show file location in file manager
+                    try:
+                        subprocess.Popen(
+                            ["xdg-open", str(Path(self.last_saved_recording).parent)],
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL,
+                            start_new_session=True,
+                        )
+                        self._log(
+                            f"Opened folder containing: {Path(self.last_saved_recording).name}"
+                        )
+                    except Exception:
+                        raise Exception(
+                            f"Could not open file or folder. Available methods failed. Try manually opening: {self.last_saved_recording}"
+                        )
+
+        except Exception as e:
+            self.logger.error(f"Failed to open recording: {e}")
+            # Show the file path in the error so user can manually open it
+            messagebox.showerror(
+                "Error",
+                f"Failed to open recording automatically.\n\nFile location:\n{self.last_saved_recording}\n\nError: {e}",
+            )
+            # Copy file path to clipboard if possible
+            try:
+                self.root.clipboard_clear()
+                self.root.clipboard_append(self.last_saved_recording)
+                messagebox.showinfo(
+                    "File Path Copied",
+                    f"File path copied to clipboard:\n{self.last_saved_recording}",
+                )
+            except Exception:
+                pass
 
     def on_closing(self):
         """Handle application closing."""
