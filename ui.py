@@ -72,6 +72,9 @@ class ProgressWindow:
         self.stop_btn = tk.Button(button_frame, text="⏹️ Stop", **btn_style)
         self.stop_btn.pack(side=tk.LEFT, padx=5)
 
+        self.cancel_btn = tk.Button(button_frame, text="❌ Cancel", **btn_style)
+        self.cancel_btn.pack(side=tk.LEFT, padx=5)
+
     def _update_progress(self):
         """Update progress display."""
         if self.timer.is_running:
@@ -572,6 +575,15 @@ class RecorderApp:
         )
         self.stop_btn.pack(side=tk.LEFT, padx=5)
 
+        self.cancel_btn = tk.Button(
+            buttons_frame,
+            text="❌ Cancel",
+            command=self.cancel_recording,
+            **btn_style,
+            state=tk.DISABLED,
+        )
+        self.cancel_btn.pack(side=tk.LEFT, padx=5)
+
         self.settings_btn = tk.Button(
             buttons_frame, text="⚙️ Settings", command=self.open_settings, **btn_style
         )
@@ -595,7 +607,7 @@ class RecorderApp:
         )
 
         # Keyboard shortcuts help
-        help_text = "Shortcuts: F1=Start/Stop, F2=Pause, F3=Settings, F4=Open Recording, Esc=Stop"
+        help_text = "Shortcuts: F1=Start/Stop, F2=Pause, F3=Settings, F4=Open Recording, F5=Cancel, Esc=Stop"
         tk.Label(main_frame, text=help_text, **label_style, font=("Arial", 8)).grid(
             row=row, column=0, columnspan=3, sticky="w", pady=(20, 0)
         )
@@ -606,6 +618,7 @@ class RecorderApp:
         self.root.bind("<F2>", lambda e: self.pause_recording())
         self.root.bind("<F3>", lambda e: self.open_settings())
         self.root.bind("<F4>", lambda e: self.open_last_recording())
+        self.root.bind("<F5>", lambda e: self.cancel_recording())
         self.root.bind("<Escape>", lambda e: self.stop_recording())
 
         # Make sure window can receive focus
@@ -762,6 +775,7 @@ class RecorderApp:
             self.start_btn.config(state=tk.DISABLED)
             self.pause_btn.config(state=tk.NORMAL, text="⏸️ Pause")
             self.stop_btn.config(state=tk.NORMAL)
+            self.cancel_btn.config(state=tk.NORMAL)
             self.progress_bar.grid(row=100, column=0, columnspan=3, sticky="ew", pady=5)
             self.progress_bar.start()
 
@@ -770,6 +784,7 @@ class RecorderApp:
             self.progress_window = ProgressWindow(self.root, self.recording_timer)
             self.progress_window.pause_btn.config(command=self.pause_recording)
             self.progress_window.stop_btn.config(command=self.stop_recording)
+            self.progress_window.cancel_btn.config(command=self.cancel_recording)
 
             self._log("Recording started...")
 
@@ -791,6 +806,7 @@ class RecorderApp:
         # Update UI immediately to show responsiveness
         self.start_btn.config(state=tk.DISABLED)
         self.stop_btn.config(state=tk.DISABLED, text="Stopping...")
+        self.cancel_btn.config(state=tk.DISABLED)
         self.root.update_idletasks()
 
         def _stop_recording_thread():
@@ -843,6 +859,79 @@ class RecorderApp:
         def _backup_cleanup():
             if self.start_btn.cget("state") == tk.DISABLED:
                 self.logger.warning("Backup cleanup triggered - re-enabling buttons")
+                self._cleanup_recording()
+
+        self.root.after(10000, _backup_cleanup)
+
+    def cancel_recording(self):
+        """Cancel recording without saving."""
+        if not self.recorder or not self.recorder.recording:
+            return
+
+        self._log("Cancelling recording...")
+
+        # Update UI immediately to show responsiveness
+        self.start_btn.config(state=tk.DISABLED)
+        self.stop_btn.config(state=tk.DISABLED)
+        self.cancel_btn.config(state=tk.DISABLED, text="Cancelling...")
+        self.root.update_idletasks()
+
+        def _cancel_recording_thread():
+            """Handle the actual cancellation in a separate thread to keep UI responsive."""
+            try:
+                # Stop recording
+                self.recording_timer.stop()
+                self.recorder.stop_recording()
+
+                # Stop audio
+                if self.audio_capture:
+                    self.audio_capture.stop_recording()
+                    self.audio_capture.cleanup()
+                    self.audio_capture = None
+
+                if self.audio_proc:
+                    self.audio_proc = None
+
+                # Clean up temp files without processing/saving
+                temp_files = []
+                if self.video_file and Path(self.video_file).exists():
+                    temp_files.append(self.video_file)
+                if self.audio_file and Path(self.audio_file).exists():
+                    temp_files.append(self.audio_file)
+
+                if temp_files:
+                    from video import cleanup_temp_files
+
+                    cleanup_temp_files(temp_files, self._log)
+
+                def _update_ui_with_cancel():
+                    self._log("Recording cancelled - no files saved")
+
+                self.root.after(0, _update_ui_with_cancel)
+
+            except Exception as e:
+                error_msg = f"Error cancelling recording: {e}"
+                self.logger.error(error_msg)
+                self.root.after(
+                    0,
+                    lambda: messagebox.showerror("Error", error_msg),
+                )
+            finally:
+                # Always schedule UI cleanup on main thread
+                self.root.after(0, self._cleanup_recording)
+
+        # Start the cancellation process in a separate thread
+        import threading
+
+        cancel_thread = threading.Thread(target=_cancel_recording_thread, daemon=True)
+        cancel_thread.start()
+
+        # Add a backup cleanup after a reasonable timeout (10 seconds)
+        def _backup_cleanup():
+            if self.start_btn.cget("state") == tk.DISABLED:
+                self.logger.warning(
+                    "Backup cleanup triggered after cancel - re-enabling buttons"
+                )
                 self._cleanup_recording()
 
         self.root.after(10000, _backup_cleanup)
@@ -947,6 +1036,7 @@ class RecorderApp:
         self.start_btn.config(state=tk.NORMAL)
         self.pause_btn.config(state=tk.DISABLED, text="⏸️ Pause")
         self.stop_btn.config(state=tk.DISABLED, text="⏹️ Stop Recording")
+        self.cancel_btn.config(state=tk.DISABLED, text="❌ Cancel")
         self.progress_bar.stop()
         self.progress_bar.grid_remove()
 
