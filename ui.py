@@ -102,6 +102,80 @@ class ProgressWindow:
         self.window.destroy()
 
 
+class ProcessingProgressWindow:
+    """Separate window showing video processing progress."""
+
+    def __init__(self, parent):
+        self.parent = parent
+        self.window = tk.Toplevel(parent)
+        self.window.title("Processing Video...")
+        self.window.geometry("400x150")
+        self.window.configure(bg="#1e1e1e")
+        self.window.resizable(False, False)
+
+        # Make window stay on top and modal
+        self.window.attributes("-topmost", True)
+        self.window.transient(parent)
+        self.window.grab_set()
+
+        # Center the window
+        self.window.update_idletasks()
+        x = (parent.winfo_x() + parent.winfo_width() // 2) - (
+            self.window.winfo_width() // 2
+        )
+        y = (parent.winfo_y() + parent.winfo_height() // 2) - (
+            self.window.winfo_height() // 2
+        )
+        self.window.geometry(f"+{x}+{y}")
+
+        self._setup_ui()
+
+    def _setup_ui(self):
+        """Set up the processing progress window UI."""
+        style = {"bg": "#1e1e1e", "fg": "#ffffff"}
+
+        # Status label
+        self.status_label = tk.Label(
+            self.window, text="🎬 Processing Video...", font=("Arial", 12), **style
+        )
+        self.status_label.pack(pady=10)
+
+        # Progress bar
+        self.progress_var = tk.DoubleVar()
+        self.progress_bar = ttk.Progressbar(
+            self.window,
+            variable=self.progress_var,
+            maximum=100,
+            length=350,
+            mode="determinate",
+        )
+        self.progress_bar.pack(pady=10)
+
+        # Progress percentage label
+        self.percentage_label = tk.Label(
+            self.window, text="0%", font=("Arial", 10), **style
+        )
+        self.percentage_label.pack(pady=5)
+
+        # Progress info
+        self.info_label = tk.Label(
+            self.window, text="Merging audio and video...", font=("Arial", 9), **style
+        )
+        self.info_label.pack(pady=5)
+
+    def update_progress(self, percentage: float, info: str = ""):
+        """Update progress bar and info."""
+        self.progress_var.set(percentage)
+        self.percentage_label.config(text=f"{percentage:.1f}%")
+        if info:
+            self.info_label.config(text=info)
+        self.window.update_idletasks()
+
+    def close(self):
+        """Close the processing window."""
+        self.window.destroy()
+
+
 class SettingsWindow:
     """Settings configuration window."""
 
@@ -409,6 +483,7 @@ class RecorderApp:
 
         # UI components
         self.progress_window: ProgressWindow | None = None
+        self.processing_window: ProcessingProgressWindow | None = None
         self.app_checkboxes: dict[str, tk.BooleanVar] = {}
         self.log_text = tk.StringVar(value="Ready")
 
@@ -938,6 +1013,14 @@ class RecorderApp:
 
     def _process_output(self, video_file: str) -> str | None:
         """Process the recorded output (merge audio/video, cleanup)."""
+        # Show processing progress window
+        self.processing_window = ProcessingProgressWindow(self.root)
+
+        def progress_callback(percentage: float, info: str):
+            """Update processing progress."""
+            if self.processing_window:
+                self.processing_window.update_progress(percentage, info)
+
         try:
             if self.config.auto_increment_filename:
                 final_output = get_incremental_filename(
@@ -982,6 +1065,7 @@ class RecorderApp:
                     audio_codec="aac",
                     audio_delay_ms=self.config.audio_delay_ms,
                     log_callback=self._log,
+                    progress_callback=progress_callback,
                 )
 
                 if success:
@@ -1029,6 +1113,11 @@ class RecorderApp:
         except Exception as e:
             self.logger.error(f"Error processing output: {e}")
             return None
+        finally:
+            # Close processing window
+            if self.processing_window:
+                self.processing_window.close()
+                self.processing_window = None
 
     def _cleanup_recording(self):
         """Clean up recording state."""
@@ -1044,6 +1133,11 @@ class RecorderApp:
         if self.progress_window:
             self.progress_window.close()
             self.progress_window = None
+
+        # Close processing window if still open
+        if self.processing_window:
+            self.processing_window.close()
+            self.processing_window = None
 
         # Reset timer
         self.recording_timer.reset()

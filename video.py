@@ -312,6 +312,7 @@ def merge_audio_video(
     audio_codec: str = "aac",
     audio_delay_ms: int = 100,
     log_callback: Callable[[str], None] | None = None,
+    progress_callback: Callable[[float, str], None] | None = None,
 ) -> bool:
     """Merge audio and video files using FFmpeg."""
 
@@ -387,17 +388,121 @@ def merge_audio_video(
                 output_path,
             ]
 
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=3600,  # 1 hour timeout for long recordings
-        )
+        # Get video duration for progress calculation
+        total_duration = None
+        if progress_callback:
+            try:
+                # Get duration using ffprobe
+                duration_cmd = [
+                    "ffprobe",
+                    "-v",
+                    "quiet",
+                    "-show_entries",
+                    "format=duration",
+                    "-of",
+                    "csv=p=0",
+                    video_path,
+                ]
+                duration_result = subprocess.run(
+                    duration_cmd, capture_output=True, text=True, timeout=30
+                )
+                if duration_result.returncode == 0:
+                    total_duration = float(duration_result.stdout.strip())
+                    callback_logger.info(
+                        f"Video duration: {total_duration:.2f} seconds"
+                    )
+            except (ValueError, subprocess.TimeoutExpired) as e:
+                callback_logger.warning(f"Could not get video duration: {e}")
 
-        if result.returncode == 0:
+        # Run FFmpeg with progress monitoring
+        if progress_callback:
+            if total_duration:
+                # Use progress format for real-time monitoring
+                cmd.extend(["-progress", "pipe:1"])
+
+                process = subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    bufsize=1,
+                    universal_newlines=True,
+                )
+
+                progress_callback(0.0, "Starting merge...")
+
+                current_time = 0.0
+                last_progress = 0.0
+
+                # Monitor progress output
+                try:
+                    while True:
+                        output = process.stdout.readline()
+                        if output == "" and process.poll() is not None:
+                            break
+
+                        if output:
+                            line = output.strip()
+                            # Parse FFmpeg progress output
+                            if line.startswith("out_time_ms="):
+                                try:
+                                    time_ms = int(line.split("=")[1])
+                                    current_time = (
+                                        time_ms / 1000000.0
+                                    )  # Convert microseconds to seconds
+
+                                    if total_duration > 0:
+                                        progress_percent = min(
+                                            (current_time / total_duration) * 100, 100.0
+                                        )
+                                        # Only update if progress increased significantly (reduces UI updates)
+                                        if progress_percent - last_progress >= 1.0:
+                                            progress_callback(
+                                                progress_percent,
+                                                f"Processing: {current_time:.1f}s / {total_duration:.1f}s",
+                                            )
+                                            last_progress = progress_percent
+                                except (ValueError, IndexError):
+                                    continue
+
+                    # Wait for process completion
+                    stderr_output = process.communicate()[1]
+                    return_code = process.returncode
+
+                except Exception as e:
+                    callback_logger.error(f"Error monitoring FFmpeg progress: {e}")
+                    process.terminate()
+                    return False
+            else:
+                # Show indeterminate progress when duration is unknown
+                progress_callback(50.0, "Processing video... (duration unknown)")
+
+                # Fallback to simple execution without detailed progress
+                result = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=3600,  # 1 hour timeout for long recordings
+                )
+                return_code = result.returncode
+                stderr_output = result.stderr
+        else:
+            # Fallback to simple execution without progress
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=3600,  # 1 hour timeout for long recordings
+            )
+            return_code = result.returncode
+            stderr_output = result.stderr
+
+        if return_code == 0:
             # Check if output file was actually created and has reasonable size
             if Path(output_path).exists():
                 output_size = Path(output_path).stat().st_size
+                if progress_callback:
+                    progress_callback(100.0, "Processing complete!")
                 callback_logger.info(
                     f"Successfully merged to: {output_path} ({output_size} bytes)"
                 )
@@ -406,9 +511,9 @@ def merge_audio_video(
                 callback_logger.error("FFmpeg completed but no output file was created")
                 return False
         else:
-            callback_logger.error(f"FFmpeg merge failed (code {result.returncode})")
-            callback_logger.error(f"FFmpeg stderr: {result.stderr}")
-            callback_logger.error(f"FFmpeg stdout: {result.stdout}")
+            callback_logger.error(f"FFmpeg merge failed (code {return_code})")
+            if stderr_output:
+                callback_logger.error(f"FFmpeg stderr: {stderr_output}")
             return False
 
     except subprocess.TimeoutExpired:
