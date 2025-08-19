@@ -282,19 +282,40 @@ class SystemAudioCapture:
             try:
                 # If paused, resume first so it can terminate properly
                 if self.paused:
+                    self.callback_logger.info(
+                        "Resuming paused audio recording before stopping"
+                    )
                     self.recording_process.send_signal(signal.SIGCONT)
-                    time.sleep(0.1)
+                    time.sleep(0.2)
 
+                self.callback_logger.info("Sending SIGTERM to audio recording process")
+                # Send SIGTERM first (gentler termination)
                 self.recording_process.terminate()
-                self.recording_process.wait(timeout=5)
-                self.callback_logger.info("Audio recording stopped")
-            except subprocess.TimeoutExpired:
-                self.callback_logger.warning(
-                    "Audio recording process did not terminate, killing it"
-                )
-                self.recording_process.kill()
+
+                # Wait longer for audio recording to flush buffers properly
+                try:
+                    self.recording_process.wait(timeout=8)
+                    self.callback_logger.info("Audio recording stopped gracefully")
+                except subprocess.TimeoutExpired:
+                    self.callback_logger.warning(
+                        "Audio recording process did not terminate gracefully within 8 seconds, killing it"
+                    )
+                    self.recording_process.kill()
+                    try:
+                        self.recording_process.wait(timeout=2)
+                    except subprocess.TimeoutExpired:
+                        self.callback_logger.error(
+                            "Audio recording process could not be killed"
+                        )
+
             except Exception as e:
                 self.callback_logger.error(f"Error stopping audio recording: {e}")
+                # Try to kill the process as a last resort
+                try:
+                    if self.recording_process:
+                        self.recording_process.kill()
+                except Exception:
+                    pass
             finally:
                 self.recording_process = None
                 self.paused = False

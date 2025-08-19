@@ -759,6 +759,13 @@ class RecorderApp:
     def start_recording(self):
         """Start recording with enhanced error handling."""
         try:
+            self._log("=== START RECORDING CALLED ===")
+
+            # Check if already recording
+            if self.recorder and self.recorder.recording:
+                self._log("Already recording - ignoring start request")
+                return
+
             # Validate FPS
             valid, fps = validate_fps(self.fps_entry.get())
             if not valid:
@@ -887,34 +894,92 @@ class RecorderApp:
         def _stop_recording_thread():
             """Handle the actual stopping in a separate thread to keep UI responsive."""
             try:
-                # Stop recording
+                self._log("=== UI STOP RECORDING THREAD STARTED ===")
+                # Stop timer first
                 self.recording_timer.stop()
-                video_output = self.recorder.stop_recording()
+                self._log("Recording timer stopped")
 
-                # Stop audio
+                # Stop video recording first and wait for it to complete
+                self._log("Stopping video recording...")
+                video_output = None
+                if self.recorder:
+                    video_output = self.recorder.stop_recording()
+                    self._log(f"Video recording stop returned: {video_output}")
+                else:
+                    self._log("No recorder object found")
+
+                # Give the video writer a moment to finalize the file
+                import time
+
+                self._log("Waiting 1 second for video file finalization...")
+                time.sleep(1.0)
+
+                # Stop audio recording
+                self._log("Stopping audio recording...")
                 if self.audio_capture:
                     self.audio_capture.stop_recording()
+                    time.sleep(0.5)  # Allow audio to finish writing
+                    self._log("Audio stopped, now cleaning up...")
                     self.audio_capture.cleanup()
                     self.audio_capture = None
+                    self._log("Audio recording stopped and cleaned up")
+                else:
+                    self._log("No audio capture to stop")
 
                 if self.audio_proc:
                     self.audio_proc = None
+                    self._log("Audio process reference cleared")
 
-                # Process output
-                if video_output:
+                # Verify files exist before processing
+                self._log("=== FILE VERIFICATION ===")
+                if video_output and Path(video_output).exists():
+                    video_size = Path(video_output).stat().st_size
+                    self._log(
+                        f"✓ Video file exists: {video_output} ({video_size} bytes)"
+                    )
+                else:
+                    self._log(f"✗ Video file missing or empty: {video_output}")
+
+                if self.audio_file and Path(self.audio_file).exists():
+                    audio_size = Path(self.audio_file).stat().st_size
+                    self._log(
+                        f"✓ Audio file exists: {self.audio_file} ({audio_size} bytes)"
+                    )
+                else:
+                    self._log(f"✗ Audio file missing or empty: {self.audio_file}")
+
+                # Process output only if we have valid video
+                self._log("=== PROCESSING OUTPUT ===")
+                if video_output and Path(video_output).exists():
+                    self._log("Starting output processing...")
                     final_output = self._process_output(video_output)
                     if final_output:
 
                         def _update_ui_with_saved_recording():
                             self.last_saved_recording = final_output
                             self.open_file_btn.config(state=tk.NORMAL)
-                            self._log(f"Recording saved: {final_output}")
+                            self._log(f"✓ Recording saved successfully: {final_output}")
 
                         self.root.after(0, _update_ui_with_saved_recording)
+                    else:
+
+                        def _update_ui_with_error():
+                            self._log("✗ Failed to process recording")
+
+                        self.root.after(0, _update_ui_with_error)
+                else:
+
+                    def _update_ui_with_no_video():
+                        self._log("✗ No video file was created - recording failed")
+
+                    self.root.after(0, _update_ui_with_no_video)
 
             except Exception as e:
                 error_msg = f"Error stopping recording: {e}"
                 self.logger.error(error_msg)
+                import traceback
+
+                self.logger.error(f"Stop recording traceback: {traceback.format_exc()}")
                 self.root.after(
                     0,
                     lambda: messagebox.showerror("Error", error_msg),
@@ -929,14 +994,17 @@ class RecorderApp:
         stop_thread = threading.Thread(target=_stop_recording_thread, daemon=True)
         stop_thread.start()
 
-        # Add a backup cleanup after a reasonable timeout (10 seconds)
+        # Add a backup cleanup after a reasonable timeout (30 seconds)
         # This ensures buttons are re-enabled even if something goes wrong
+        # Only trigger if we're not currently recording
         def _backup_cleanup():
-            if self.start_btn.cget("state") == tk.DISABLED:
+            if self.start_btn.cget("state") == tk.DISABLED and (
+                not self.recorder or not self.recorder.recording
+            ):
                 self.logger.warning("Backup cleanup triggered - re-enabling buttons")
                 self._cleanup_recording()
 
-        self.root.after(10000, _backup_cleanup)
+        self.root.after(30000, _backup_cleanup)  # Increased from 10 to 30 seconds
 
     def cancel_recording(self):
         """Cancel recording without saving."""
@@ -1001,15 +1069,17 @@ class RecorderApp:
         cancel_thread = threading.Thread(target=_cancel_recording_thread, daemon=True)
         cancel_thread.start()
 
-        # Add a backup cleanup after a reasonable timeout (10 seconds)
+        # Add a backup cleanup after a reasonable timeout (30 seconds)
         def _backup_cleanup():
-            if self.start_btn.cget("state") == tk.DISABLED:
+            if self.start_btn.cget("state") == tk.DISABLED and (
+                not self.recorder or not self.recorder.recording
+            ):
                 self.logger.warning(
                     "Backup cleanup triggered after cancel - re-enabling buttons"
                 )
                 self._cleanup_recording()
 
-        self.root.after(10000, _backup_cleanup)
+        self.root.after(30000, _backup_cleanup)  # Increased from 10 to 30 seconds
 
     def _process_output(self, video_file: str) -> str | None:
         """Process the recorded output (merge audio/video, cleanup)."""
@@ -1121,6 +1191,15 @@ class RecorderApp:
 
     def _cleanup_recording(self):
         """Clean up recording state."""
+        self.logger.info("=== UI CLEANUP STARTED ===")
+
+        # Only cleanup if we're actually not recording
+        if self.recorder and self.recorder.recording:
+            self.logger.warning(
+                "Cleanup called but recording is still active - skipping cleanup"
+            )
+            return
+
         # Update UI
         self.start_btn.config(state=tk.NORMAL)
         self.pause_btn.config(state=tk.DISABLED, text="⏸️ Pause")
@@ -1133,14 +1212,17 @@ class RecorderApp:
         if self.progress_window:
             self.progress_window.close()
             self.progress_window = None
+            self.logger.info("Progress window closed")
 
         # Close processing window if still open
         if self.processing_window:
             self.processing_window.close()
             self.processing_window = None
+            self.logger.info("Processing window closed")
 
         # Reset timer
         self.recording_timer.reset()
+        self.logger.info("=== UI CLEANUP COMPLETED ===")
 
     def open_settings(self):
         """Open settings window."""
