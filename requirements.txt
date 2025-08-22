@@ -5,9 +5,31 @@ opencv-python>=4.8.0
 mss>=9.0.0
 numpy>=1.24.0
 
+# Audio processing libraries
+sounddevice>=0.4.0
+soundfile>=0.12.0
+pydub>=0.25.0
+
+# Input handling
+keyboard>=0.13.0
+pynput>=1.7.0
+
+# CLI interface
+click>=8.0.0
+
+# FFmpeg Python wrapper
+ffmpeg-python>=0.2.0
+
+# GUI framework (usually included with Python on most systems)
+# Note: tkinter is part of Python standard library on most distributions
+# If missing, install with: sudo apt install python3-tk
+
 # Audio processing
 # Note: PulseAudio (pactl) and FFmpeg are system dependencies
 # Install with: sudo apt install pulseaudio-utils ffmpeg
+
+# Development and testing
+pytest>=7.0.0
 
 # Optional dependencies for enhanced features
 Pillow>=10.0.0  # For additional image processing
