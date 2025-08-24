@@ -44,12 +44,22 @@ sudo snap refresh screenrec-lite
 
 Clone this repo and build locally:
 
+**Using UV (recommended):**
 ```bash
 git clone https://github.com/m0tz/minimal-screen-recorder.git
 cd minimal-screen-recorder
+./install_deps.sh  # Install system dependencies (FFmpeg, PulseAudio, etc.)
+uv run python ui.py
+```
+
+**Using traditional venv:**
+```bash
+git clone https://github.com/m0tz/minimal-screen-recorder.git
+cd minimal-screen-recorder
+./install_deps.sh  # Install system dependencies (FFmpeg, PulseAudio, etc.)
 python3 -m venv env && source env/bin/activate
 pip install -r requirements.txt
-python app.py
+python ui.py
 ```
 
 🧪 Run tests
