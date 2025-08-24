@@ -1175,13 +1175,40 @@ class RecorderApp:
                     import shutil
 
                     shutil.move(video_file, final_output)
+
+                    # Clean up audio temp file if it exists
+                    if self.audio_file and Path(self.audio_file).exists():
+                        cleanup_temp_files([self.audio_file], self._log)
+
                     return final_output
                 else:
                     self._log("ERROR: No video file to save")
+
+                    # Clean up temp files even if processing failed
+                    temp_files = []
+                    if self.audio_file and Path(self.audio_file).exists():
+                        temp_files.append(self.audio_file)
+                    if temp_files:
+                        cleanup_temp_files(temp_files, self._log)
+
                     return None
 
         except Exception as e:
             self.logger.error(f"Error processing output: {e}")
+
+            # Clean up temp files even if processing failed
+            temp_files = []
+            if (
+                hasattr(self, "audio_file")
+                and self.audio_file
+                and Path(self.audio_file).exists()
+            ):
+                temp_files.append(self.audio_file)
+            if "video_file" in locals() and Path(video_file).exists():
+                temp_files.append(video_file)
+            if temp_files:
+                cleanup_temp_files(temp_files, self._log)
+
             return None
         finally:
             # Close processing window
